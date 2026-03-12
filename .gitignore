@@ -1,0 +1,36 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+.jupyter_runtime/
+
+# Local environments
+.venv/
+venv/
+.env
+.env.*
+
+# Generated report artifacts
+outputs/*
+!outputs/.gitkeep
+
+# Raw/private telemetry data
+data/raw/*
+!data/raw/.gitkeep
+
+data/*.csv
+!data/events.csv
+!data/events.example.csv
+
+# Notebook and OS noise
+.DS_Store
+Thumbs.db
+
+# Local analysis scratch notebooks
+*.executed.ipynb
+FA20DIT_Engine_Health_Validaton_v1.ipynb
+notebooks/wrx_log_analysis_03052026.ipynb
