@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ from nbclient import NotebookClient
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    notebook_path = root / "notebooks" / "telemetry_report.ipynb"
+    notebook_path = root / "notebooks" / "FA20DIT_Engine_Health_Analysis.ipynb"
     output_path = root / "outputs" / "latest_report.ipynb"
     runtime_dir = root / ".jupyter_runtime"
 

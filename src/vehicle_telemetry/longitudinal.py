@@ -123,6 +123,16 @@ def _parse_datetime_from_filename(name: str) -> datetime | None:
     return None
 
 
+def _parse_cobb_sequence_from_filename(name: str) -> int | None:
+    m = re.fullmatch(r"datalog(\d+)\.csv", name.strip().lower())
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
 def canonical_log_datetime(path: Path, log_type: str) -> tuple[datetime, str]:
     lines = _read_first_lines_with_fallback(path, n=2)
     if log_type == "obd_fusion" and lines:
@@ -184,18 +194,31 @@ def _count_true_runs(mask: pd.Series) -> int:
 
 def classify_session(frame: pd.DataFrame) -> str:
     load = pd.to_numeric(frame.get("load_proxy", np.nan), errors="coerce")
+    map_kpa = pd.to_numeric(frame.get("map_kpa", np.nan), errors="coerce")
+    throttle = pd.to_numeric(frame.get("throttle_pct", np.nan), errors="coerce")
+    rpm = pd.to_numeric(frame.get("rpm", np.nan), errors="coerce")
+    dt_s = pd.to_numeric(frame.get("dt_s", np.nan), errors="coerce").fillna(0.0)
     max_load = _safe_float(load.max())
     p95 = _safe_float(load.quantile(0.95)) if load.notna().any() else np.nan
     high = load > p95 if np.isfinite(p95) else pd.Series(False, index=frame.index)
     high_pct = _safe_float(high.mean() * 100.0) if len(high) else 0.0
     repeated = _count_true_runs(high)
+    max_map = _safe_float(map_kpa.max())
+    hard = (throttle > 60.0) & (rpm > 3000.0)
+    hard_pct = _safe_float(hard.mean() * 100.0) if len(hard) else 0.0
+    hard_time_s = float(dt_s.where(hard, 0.0).sum()) if len(dt_s) else 0.0
 
-    # Keep session tagging conservative so ordinary spirited driving does not become "racing".
+    # Tag race-oriented sessions using a combination of sustained demand and boost/load shape.
+    # This stays readable while separating track/autocross style pulls from ordinary spirited street driving.
     if np.isfinite(max_load) and max_load >= 90.0:
         return "racing"
-    if np.isfinite(high_pct) and high_pct >= 20.0 and np.isfinite(max_load) and max_load >= 60.0:
+    if np.isfinite(p95) and p95 >= 20.0 and np.isfinite(max_map) and max_map >= 200.0:
         return "racing"
-    if repeated >= 6 and np.isfinite(max_load) and max_load >= 50.0:
+    if np.isfinite(hard_pct) and hard_pct >= 3.0 and np.isfinite(max_map) and max_map >= 190.0:
+        return "racing"
+    if hard_time_s >= 4.0 and np.isfinite(p95) and p95 >= 18.0 and np.isfinite(max_map) and max_map >= 185.0:
+        return "racing"
+    if repeated >= 6 and np.isfinite(max_load) and max_load >= 50.0 and np.isfinite(max_map) and max_map >= 185.0:
         return "racing"
     return "cruising"
 
@@ -241,6 +264,7 @@ def summarize_log(path: Path, events: pd.DataFrame) -> LogResult:
         "filename": path.name,
         "log_datetime": dt_canonical,
         "log_datetime_source": dt_source,
+        "cobb_sequence": _parse_cobb_sequence_from_filename(path.name) if log_type == "cobb" else np.nan,
         "log_type": log_type,
         "session_type": classify_session(feat),
         "duration_s": _duration_seconds(feat),
@@ -293,6 +317,21 @@ def summarize_all_logs(raw_dir: str | Path, events: pd.DataFrame) -> tuple[pd.Da
     return summary, frames
 
 
+def _bucket_sort(summary: pd.DataFrame) -> pd.DataFrame:
+    if summary.empty:
+        return summary
+    out = summary.copy()
+    if "cobb_sequence" not in out.columns:
+        return out.sort_values("log_datetime")
+
+    cobb_mask = out["log_type"].eq("cobb") & out["cobb_sequence"].notna()
+    out["_bucket_order"] = out["log_datetime"]
+    if cobb_mask.any():
+        base_dt = pd.Timestamp("2000-01-01")
+        out.loc[cobb_mask, "_bucket_order"] = base_dt + pd.to_timedelta(out.loc[cobb_mask, "cobb_sequence"], unit="D")
+    return out.sort_values("_bucket_order").drop(columns="_bucket_order")
+
+
 def assign_eras(summary: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
     if summary.empty:
         return summary
@@ -312,7 +351,7 @@ def latest_by_bucket(summary: pd.DataFrame) -> dict[tuple[str, str], pd.Series |
     latest: dict[tuple[str, str], pd.Series | None] = {}
     for log_type, session_type in BUCKETS:
         s = summary[(summary["log_type"] == log_type) & (summary["session_type"] == session_type)]
-        latest[(log_type, session_type)] = s.sort_values("log_datetime").iloc[-1] if not s.empty else None
+        latest[(log_type, session_type)] = _bucket_sort(s).iloc[-1] if not s.empty else None
     return latest
 
 
@@ -323,9 +362,16 @@ def select_baseline(summary: pd.DataFrame, latest_row: pd.Series | None) -> pd.D
     cands = summary[
         (summary["log_type"] == latest_row["log_type"])
         & (summary["session_type"] == latest_row["session_type"])
-        & (summary["log_datetime"] < latest_row["log_datetime"])
         & (summary["era_id"] == latest_row["era_id"])
     ].copy()
+
+    if latest_row["log_type"] == "cobb" and pd.notna(latest_row.get("cobb_sequence", np.nan)):
+        cands = cands[cands["cobb_sequence"] < latest_row["cobb_sequence"]].copy()
+        if cands.empty:
+            return cands
+        return cands.sort_values("cobb_sequence").tail(6)
+
+    cands = cands[cands["log_datetime"] < latest_row["log_datetime"]].copy()
 
     if cands.empty:
         return cands

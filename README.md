@@ -80,7 +80,7 @@ Supported `event_type` values:
 Open and run:
 
 ```text
-notebooks/telemetry_report.ipynb
+notebooks/FA20DIT_Engine_Health_Analysis.ipynb
 ```
 
 Or execute the saved report runner:
@@ -136,7 +136,7 @@ That means OBD logs can usually use embedded session timestamps, while some Cobb
 
 - Keep code simple, explicit, and easy to inspect
 - Missing columns should degrade gracefully
-- Most report logic lives in `src/vehicle_telemetry/longitudinal.py` and `notebooks/telemetry_report.ipynb`
+- Most report logic lives in `src/vehicle_telemetry/longitudinal.py` and `notebooks/FA20DIT_Engine_Health_Analysis.ipynb`
 
 ## Next Steps
 
